@@ -1,0 +1,220 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AUTENTICAÇÃO
+// ═══════════════════════════════════════════════════════════════
+
+// Usuários do sistema que fazem login e gerenciam escalas
+model Usuario {
+  id           Int      @id @default(autoincrement())
+  nome         String
+  email        String   @unique
+  senha        String
+  role         Role     @default(MEMBRO)
+  ativo        Boolean  @default(true)
+  // Um SUPER_ADMIN não tem igrejaId (gerencia tudo)
+  // ADMIN/LIDER/MEMBRO são vinculados a uma igreja
+  igrejaId     Int?
+  igreja       Igreja?  @relation(fields: [igrejaId], references: [id])
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  @@map("usuarios")
+}
+
+enum Role {
+  SUPER_ADMIN // acesso total ao sistema
+  ADMIN // gerencia uma igreja inteira
+  LIDER // gerencia um setor específico
+  MEMBRO // apenas visualiza escalas
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOCALIZAÇÃO
+// ═══════════════════════════════════════════════════════════════
+
+model Pais {
+  id      Int      @id @default(autoincrement())
+  nome    String
+  sigla   String   @unique // "BR", "US", "PT"
+  cidades Cidade[]
+
+  @@map("paises")
+}
+
+model Cidade {
+  id      Int      @id @default(autoincrement())
+  nome    String
+  paisId  Int
+  pais    Pais     @relation(fields: [paisId], references: [id])
+  igrejas Igreja[]
+
+  @@map("cidades")
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  IGREJA E SETORES
+// ═══════════════════════════════════════════════════════════════
+
+model Igreja {
+  id           Int                 @id @default(autoincrement())
+  nome         String
+  cidadeId     Int
+  cidade       Cidade              @relation(fields: [cidadeId], references: [id])
+  setores      Setor[]
+  cultos       Culto[]
+  usuarios     Usuario[]
+  // Configurações de culto específicas desta igreja
+  // (ex: Culto Oficial em Maringá é 18:30, não 19:30)
+  configCultos ConfigCultoIgreja[]
+  criadoEm     DateTime            @default(now())
+
+  @@map("igrejas")
+}
+
+// Um setor é um grupo de membros com função específica
+// Ex: Som, Organistas, Porteiros, Irmãos do Pátio, Banheiro, Porteirinhos
+model Setor {
+  id        Int      @id @default(autoincrement())
+  nome      String
+  descricao String?
+  igrejaId  Int
+  igreja    Igreja   @relation(fields: [igrejaId], references: [id])
+  membros   Membro[]
+  criadoEm  DateTime @default(now())
+
+  @@map("setores")
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MEMBROS
+// ═══════════════════════════════════════════════════════════════
+
+model Membro {
+  id           Int      @id @default(autoincrement())
+  nome         String
+  // Telefone no formato internacional: 5544999999999
+  // DDI (55) + DDD (44) + número (999999999)
+  telefone     String?
+  ativo        Boolean  @default(true)
+  // Posição no rodízio: quem tem número menor é escalado primeiro
+  // Resetar quando todos já rodaram
+  ordemRodizio Int      @default(0)
+  setorId      Int
+  setor        Setor    @relation(fields: [setorId], references: [id])
+  escalas      Escala[]
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  @@map("membros")
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TIPOS DE CULTO E CONFIGURAÇÃO DE HORÁRIOS
+// ═══════════════════════════════════════════════════════════════
+
+// Tipo de culto é global — não pertence a uma igreja específica
+// Ex: "Culto Oficial", "Reunião de Jovens e Menores", "Ensaio", "Ensaio Técnico"
+model TipoCulto {
+  id            Int                 @id @default(autoincrement())
+  nome          String
+  // Horário padrão usado quando a igreja não tem configuração específica
+  horarioPadrao String // "19:30"
+  // Dias da semana padrão para este tipo (0=Dom, 1=Seg, ..., 6=Sáb)
+  // Armazenado como JSON: "[2, 6, 0]" = terça, sábado, domingo
+  diasSemana    String              @default("[]")
+  ativo         Boolean             @default(true)
+  cultos        Culto[]
+  configIgrejas ConfigCultoIgreja[]
+
+  @@map("tipos_culto")
+}
+
+// Permite que cada igreja sobrescreva o horário padrão de um tipo de culto
+// Ex: Culto Oficial em Maringá domingo = 18:30 (diferente do padrão 19:30)
+model ConfigCultoIgreja {
+  id          Int       @id @default(autoincrement())
+  igrejaId    Int
+  tipoCultoId Int
+  // Horário específico desta igreja para este tipo (null = usar o padrão)
+  horario     String?
+  // Dias específicos desta igreja (null = usar o padrão do tipo)
+  diasSemana  String?
+  // Observação ex: "Domingo o culto oficial começa mais cedo"
+  observacao  String?
+  igreja      Igreja    @relation(fields: [igrejaId], references: [id])
+  tipoCulto   TipoCulto @relation(fields: [tipoCultoId], references: [id])
+
+  // Cada igreja só pode ter uma config por tipo de culto
+  @@unique([igrejaId, tipoCultoId])
+  @@map("config_culto_igrejas")
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CULTOS
+// ═══════════════════════════════════════════════════════════════
+
+// Um culto é uma ocorrência específica: "Culto Oficial de 04/06/2025"
+model Culto {
+  id          Int         @id @default(autoincrement())
+  // Data completa do culto (apenas a data, sem hora)
+  data        DateTime
+  // Horário real do culto — pode vir da config da igreja ou do tipo
+  horario     String
+  observacao  String?
+  // Status do culto
+  status      StatusCulto @default(AGENDADO)
+  igrejaId    Int
+  tipoCultoId Int
+  igreja      Igreja      @relation(fields: [igrejaId], references: [id])
+  tipo        TipoCulto   @relation(fields: [tipoCultoId], references: [id])
+  escalas     Escala[]
+  criadoEm    DateTime    @default(now())
+
+  @@map("cultos")
+}
+
+enum StatusCulto {
+  AGENDADO // culto ainda vai acontecer
+  REALIZADO // culto já aconteceu
+  CANCELADO // culto foi cancelado
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ESCALAS
+// ═══════════════════════════════════════════════════════════════
+
+// Escala é o vínculo entre um membro e um culto
+// Um culto pode ter vários membros escalados (um por setor, por ex.)
+model Escala {
+  id               Int      @id @default(autoincrement())
+  cultoId          Int
+  membroId         Int
+  // Confirmação de presença pelo membro (futuro: via WhatsApp)
+  confirmado       Boolean? // null = não respondeu, true = confirmou, false = recusou
+  // Controle de notificações para não enviar duplicado
+  notificado1Dia   Boolean  @default(false)
+  notificado3Horas Boolean  @default(false)
+  observacao       String?
+  culto            Culto    @relation(fields: [cultoId], references: [id])
+  membro           Membro   @relation(fields: [membroId], references: [id])
+  criadoEm         DateTime @default(now())
+
+  // Um membro não pode estar escalado duas vezes no mesmo culto
+  @@unique([cultoId, membroId])
+  @@map("escalas")
+}
