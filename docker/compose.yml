@@ -1,5 +1,5 @@
 services:
-  api:
+  minha-escala-api:
     build:
       context: ..
       dockerfile: docker/Dockerfile
