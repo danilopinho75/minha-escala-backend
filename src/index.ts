@@ -8,6 +8,12 @@ const PORT = process.env.PORT ?? 3333;
 
 app.use(express.json());
 
+app.get('/', (_req, res) => {
+  res.json({
+    message: 'Minha Escala API online!'
+  });
+});
+
 app.use((_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH')
